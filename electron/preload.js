@@ -9,6 +9,11 @@ contextBridge.exposeInMainWorld('api', {
     detect: (ip) => ipcRenderer.invoke('router:detect', ip),
     login: (ip, username, password) => ipcRenderer.invoke('router:login', ip, username, password),
     getSettings: (ip) => ipcRenderer.invoke('router:getSettings', ip),
-    applySettings: (ip, settings) => ipcRenderer.invoke('router:applySettings', ip, settings)
+    applySettings: (ip, settings) => ipcRenderer.invoke('router:applySettings', ip, settings),
+    onProgress: (cb) => {
+      const handler = (_, step) => cb(step)
+      ipcRenderer.on('router:progress', handler)
+      return () => ipcRenderer.removeListener('router:progress', handler)
+    }
   }
 })

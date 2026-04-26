@@ -13,6 +13,7 @@ export const useWifiStore = defineStore('wifi', {
     connecting: false,
     optimizing: false,
     loginRequired: false,
+    connectStep: null, // 'loading_page' | 'waiting_form' | 'logging_in' | 'verifying' | 'reading_settings'
     toast: null // { type: 'success'|'error'|'info', message: string }
   }),
 
@@ -63,16 +64,25 @@ export const useWifiStore = defineStore('wifi', {
 
     async loginRouter(username, password) {
       this.connecting = true
+      this.connectStep = 'loading_page'
+
+      const unsubProgress = window.api.router.onProgress((step) => {
+        this.connectStep = step
+      })
+
       try {
         const res = await window.api.router.login(this.routerIp, username, password)
         if (!res.ok) throw new Error(res.error)
         this.routerPlugin = res.data
         this.loginRequired = false
+        this.connectStep = 'reading_settings'
         await this.fetchRouterSettings()
       } catch (err) {
         throw err
       } finally {
+        unsubProgress()
         this.connecting = false
+        this.connectStep = null
       }
     },
 

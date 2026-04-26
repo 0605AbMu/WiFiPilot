@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@hertzg/tplink-api": "npm:@jsr/hertzg__tplink-api@^1.2.0",
     "axios": "^1.7.2",
     "cheerio": "^1.0.0",
     "node-wifi": "^2.0.16",

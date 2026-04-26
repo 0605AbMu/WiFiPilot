@@ -13,11 +13,13 @@ ipcMain.handle('router:detect', async (_, ip) => {
   }
 })
 
-ipcMain.handle('router:login', async (_, ip, username, password) => {
+ipcMain.handle('router:login', async (event, ip, username, password) => {
   try {
     const name = await detectPlugin(ip)
     const plugin = getPlugin(name)
-    const session = await plugin.login(ip, username, password)
+    const session = await plugin.login(ip, username, password, (step) => {
+      event.sender.send('router:progress', step)
+    })
     sessions.set(ip, { plugin, session })
     return { ok: true, data: name }
   } catch (err) {

@@ -17,21 +17,23 @@ class TpLinkPlugin extends BrowserPlugin {
   loginPage(ip) { return `http://${ip}` }
 
   loginReady() {
-    // TP-Link Archer new UI polls a token check API for ~10–12s before rendering #login-card.
-    // We wait for any password input to appear.
     return `(function() {
+      // If already logged in (session cookie persisted), router skips login and shows dashboard
+      var loginCard = document.querySelector('#login-card');
+      var hash = location.hash;
+      if (!loginCard && hash && hash !== '' && hash !== '#') {
+        console.log('[TpLink] loginReady: already on dashboard (' + hash + '), skipping login form');
+        return true;
+      }
+
+      // Normal case: wait for password input
       var hasPwd = !!(
         document.querySelector('input.password-text') ||
         document.querySelector('input.password-hidden') ||
         document.querySelector('input[type="password"]')
       );
       if (!hasPwd) {
-        // Log current DOM state for debugging
-        var mc = document.querySelector('#main-container');
-        console.log('[TpLink] waiting for login form... main-container children:',
-          mc ? mc.children.length : 'not found',
-          '| body classes:', document.body.className.slice(0,80)
-        );
+        console.log('[TpLink] waiting for login form... hash:', hash, '| #login-card:', !!loginCard);
       }
       return hasPwd;
     })()`
@@ -41,12 +43,15 @@ class TpLinkPlugin extends BrowserPlugin {
     return `(function() {
       var pwd = ${JSON.stringify(password)};
 
-      // TP-Link Archer uses a custom password widget:
-      //   input.password-text   → visible text field (user types here)
-      //   input.password-hidden → hidden field with the real value
       var visible = document.querySelector('input.password-text');
       var hidden  = document.querySelector('input.password-hidden');
       var plain   = document.querySelector('input[type="password"]');
+
+      // Already logged in — no form present
+      if (!visible && !hidden && !plain) {
+        console.log('[TpLink] fillLogin: no password field, already logged in');
+        return true;
+      }
 
       console.log('[TpLink] fillLogin — visible:', !!visible, 'hidden:', !!hidden, 'plain:', !!plain);
 
@@ -64,19 +69,15 @@ class TpLinkPlugin extends BrowserPlugin {
         plain.dispatchEvent(new Event('input', { bubbles: true }));
       }
 
-      // Submit button — TP-Link renders an <a class="button-button"> inside #login-card
       var btn = document.querySelector(
-        '#login-card .button-button, ' +
-        '#login-card a[class*="button"], ' +
-        '#login-card button, ' +
-        'a.btn-login, button.btn-login, [data-action="login"]'
+        '#login-card .button-button, #login-card a[class*="button"], ' +
+        '#login-card button, a.btn-login, button.btn-login, [data-action="login"]'
       );
       console.log('[TpLink] submit btn:', btn ? btn.className : 'NOT FOUND');
 
       if (btn) {
         btn.click();
       } else {
-        // Fallback: Enter key
         var target = visible || plain;
         if (target) target.dispatchEvent(
           new KeyboardEvent('keyup', { key: 'Enter', keyCode: 13, bubbles: true })
@@ -88,10 +89,14 @@ class TpLinkPlugin extends BrowserPlugin {
 
   loginDone() {
     return `(function() {
-      var card  = document.querySelector('#login-card');
-      var token = !!(window.$ && $.su && $.su.userInfo && $.su.userInfo.token);
-      console.log('[TpLink] loginDone — card present:', !!card, '| token:', token);
-      return !card || token;
+      // No login card = successfully logged in (or was never needed)
+      var card = document.querySelector('#login-card');
+      if (!card) {
+        console.log('[TpLink] loginDone: no #login-card, logged in. hash=' + location.hash);
+        return true;
+      }
+      console.log('[TpLink] loginDone: still on login page');
+      return false;
     })()`
   }
 
@@ -113,28 +118,27 @@ class TpLinkPlugin extends BrowserPlugin {
 
   readWifi() {
     return `(function() {
-      var chEl = document.querySelector('[data-bind*="hostNwAdvM.curChannel"] .combobox-text');
-      var bwEl = document.querySelector('[data-bind*="hostNwAdvM.uChannelWidth"] .combobox-text');
-      var ch   = chEl ? chEl.value.trim() : null;
-      var bw   = bwEl ? bwEl.value.trim().replace(/\\s*MHz/i, '') : null;
-
-      // Fallback: read from internal model if DOM isn't ready
-      if (!ch && window.$ && $.su && $.su.modelManager) {
-        try {
-          var m = $.su.modelManager._models['hostNwAdvM'];
-          if (m) {
-            ch = String(m.curChannel || '');
-            bw = String(m.uChannelWidth || '');
-            // uChannelWidth is an index (0=Auto,1=20,2=40) — convert to MHz label
-            var bwMap = { '0': 'Auto', '1': '20', '2': '40' };
-            bw = bwMap[bw] || bw;
-          }
-        } catch(e) {}
+      function getComboboxValue(dataBind) {
+        var c = document.querySelector('[data-bind*="' + dataBind + '"]');
+        if (!c) return null;
+        // Prefer viewObj.getValue() — most accurate
+        var vo = window.$ ? $(c).data('viewObj') : null;
+        if (vo && typeof vo.getValue === 'function') return String(vo.getValue());
+        // Fallback: read the visible text input
+        var el = c.querySelector('input.combobox-text, .combobox-text');
+        return el ? el.value.trim() : null;
       }
+
+      var ch = getComboboxValue('hostNwAdvM.curChannel');
+
+      // Bandwidth viewObj.getValue() returns index (0/1/2) — convert to MHz string
+      var bwIndex = getComboboxValue('hostNwAdvM.uChannelWidth');
+      var bwMap = { '0': 'Auto', '1': '20', '2': '40' };
+      var bw = bwMap[String(bwIndex)] || String(bwIndex || '20').replace(/\\s*MHz/i, '').trim();
 
       return {
         channel:      parseInt(ch) || 'auto',
-        channelWidth: bw || '20',
+        channelWidth: bw,
         band:         '2.4GHz'
       };
     })()`
@@ -144,71 +148,39 @@ class TpLinkPlugin extends BrowserPlugin {
     return `(function() {
       var targetChannel = ${JSON.stringify(String(settings.channel))};
       var bwRaw = ${JSON.stringify(String(settings.channelWidth))};
-      // Span text is "Auto", "20 MHz", "40 MHz" — only append " MHz" for numeric values
-      var targetWidth = /^\\d+$/.test(bwRaw) ? bwRaw + ' MHz' : bwRaw;
+      // Bandwidth viewObj uses index: 0=Auto, 1=20MHz, 2=40MHz
+      var bwIndex = ({ 'auto': '0', '0': '0', '20': '1', '40': '2', '80': '2' })[bwRaw.toLowerCase()] || '1';
 
-      function setCombobox(dataBind, targetText) {
-        // Find the combobox container by data-bind substring
-        var container = document.querySelector('[data-bind*="' + dataBind + '"]');
-        if (!container) { console.warn('[TpLink] combobox not found:', dataBind); return false; }
+      function setCombobox(dataBind, val) {
+        var c = document.querySelector('[data-bind*="' + dataBind + '"]');
+        if (!c) { console.warn('[TpLink] no container:', dataBind); return false; }
+        var vo = window.$ ? $(c).data('viewObj') : null;
+        if (!vo || typeof vo.setValue !== 'function') {
+          console.warn('[TpLink] no viewObj for', dataBind); return false;
+        }
+        vo.setValue(val);
+        console.log('[TpLink]', dataBind, '→', vo.getValue());
+        return true;
+      }
 
-        // Click the combobox to open the dropdown
-        var trigger = container.querySelector('.combobox-text, .combobox-arrow');
-        if (trigger) trigger.click();
+      return (async function() {
+        setCombobox('hostNwAdvM.curChannel',    targetChannel);
+        setCombobox('hostNwAdvM.uChannelWidth', bwIndex);
 
-        // Find and click the matching list item
-        var items = container.querySelectorAll('li.combobox-list');
-        for (var i = 0; i < items.length; i++) {
-          var span = items[i].querySelector('span.text');
-          if (span && span.textContent.trim() === targetText) {
-            // Click the label (TP-Link uses <label> inside <li>)
-            var lbl = items[i].querySelector('label') || items[i];
-            lbl.click();
-            console.log('[TpLink] set', dataBind, '=', targetText);
-            return true;
+        // Small wait so the widget updates its dirty state before save
+        await new Promise(function(r) { setTimeout(r, 500); });
+
+        // Click every SAVE button (TP-Link renders 2 — for 2.4GHz and 5GHz sections)
+        var saved = false;
+        document.querySelectorAll('a.button-button').forEach(function(btn) {
+          if (btn.textContent.trim().toUpperCase() === 'SAVE') {
+            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+            saved = true;
+            console.log('[TpLink] SAVE dispatched');
           }
-        }
-
-        // Fallback: update model directly
-        if (window.$ && $.su && $.su.modelManager) {
-          try {
-            var m = $.su.modelManager._models['hostNwAdvM'];
-            if (m) {
-              if (dataBind === 'hostNwAdvM.curChannel') m.curChannel = parseInt(targetText) || targetText;
-              if (dataBind === 'hostNwAdvM.uChannelWidth') {
-                var idx = { 'Auto': 0, '20 MHz': 1, '40 MHz': 2 };
-                m.uChannelWidth = idx[targetText] !== undefined ? idx[targetText] : parseInt(targetText);
-              }
-              console.log('[TpLink] set via model:', dataBind, '=', targetText);
-              return true;
-            }
-          } catch(e) { console.warn('[TpLink] model update failed:', e.message); }
-        }
-        return false;
-      }
-
-      setCombobox('hostNwAdvM.curChannel',    targetChannel);
-      setCombobox('hostNwAdvM.uChannelWidth', targetWidth);
-
-      // Click SAVE — TP-Link has two hidden .button-button elements; force-click both candidates
-      var saved = false;
-      document.querySelectorAll('a.button-button').forEach(function(btn) {
-        if (btn.textContent.trim().toUpperCase() === 'SAVE') {
-          btn.click();
-          saved = true;
-          console.log('[TpLink] SAVE clicked');
-        }
-      });
-
-      // Fallback: trigger save via model manager if button was not found/visible
-      if (!saved && window.$ && $.su && $.su.modelManager) {
-        try {
-          var m = $.su.modelManager._models['hostNwAdvM'];
-          if (m && m.save) { m.save(); console.log('[TpLink] save via model.save()'); saved = true; }
-        } catch(e) {}
-      }
-
-      return saved;
+        });
+        return saved;
+      })();
     })()`
   }
 }

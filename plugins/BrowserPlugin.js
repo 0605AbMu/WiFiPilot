@@ -14,7 +14,9 @@ class BrowserPlugin extends RouterPlugin {
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: false,
-        webSecurity: false
+        webSecurity: false,
+        // Isolated session per window — router cookies don't leak between connections
+        partition: 'persist:router-' + Date.now()
       }
     })
   }
@@ -76,8 +78,10 @@ class BrowserPlugin extends RouterPlugin {
     await win.webContents.executeJavaScript(this.navToWifi())
     await new Promise(r => setTimeout(r, 1500))
     await this._waitFor(win, this.wifiReady(), 10000)
+    // writeWifi returns a Promise (async IIFE) — executeJavaScript awaits it
     await win.webContents.executeJavaScript(this.writeWifi(settings))
-    await new Promise(r => setTimeout(r, 3000))
+    // Wait for the router to process the save request
+    await new Promise(r => setTimeout(r, 5000))
   }
 
   // Subclasses override ↓

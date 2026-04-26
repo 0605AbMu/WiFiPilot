@@ -3,6 +3,11 @@ const path = require('path')
 
 const isDev = !app.isPackaged
 
+// Enable CDP remote debugging in dev mode so we can inspect any BrowserWindow
+if (isDev) {
+  app.commandLine.appendSwitch('remote-debugging-port', '9222')
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200,

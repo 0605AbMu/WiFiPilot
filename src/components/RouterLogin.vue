@@ -1,11 +1,14 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useWifiStore } from '../store/wifi'
 
 const store = useWifiStore()
 const username = ref('admin')
 const password = ref('')
 const error = ref('')
+
+// TP-Link modern routers only require password — no username field shown
+const passwordOnly = computed(() => store.routerPlugin === 'TP-Link')
 
 async function submit() {
   error.value = ''
@@ -29,7 +32,7 @@ async function submit() {
       </p>
 
       <form class="space-y-3" @submit.prevent="submit">
-        <div>
+        <div v-if="!passwordOnly">
           <label class="block text-xs font-medium text-slate-600 mb-1">Username</label>
           <input
             v-model="username"

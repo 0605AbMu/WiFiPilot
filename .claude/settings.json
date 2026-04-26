@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ' *)",
+      "Bash(curl -si --connect-timeout 5 -H 'User-Agent: Mozilla/5.0' -H 'Referer: http://192.168.0.1/' http://192.168.0.1/login.html)",
+      "Bash(curl -si --connect-timeout 5 -H 'User-Agent: Mozilla/5.0' 'http://192.168.0.1/?code=login')",
+      "Bash(curl -si --connect-timeout 5 -H \"User-Agent: Mozilla/5.0\" \"http://192.168.0.1/themes/default/login.html\")",
+      "Bash(curl -s --connect-timeout 5 -H 'User-Agent: Mozilla/5.0' -H 'Referer: http://192.168.0.1/' 'http://192.168.0.1/js/app/url.js?t=7e3d9280')",
+      "Bash(curl -s --connect-timeout 5 -H 'User-Agent: Mozilla/5.0' -H 'Referer: http://192.168.0.1/' http://192.168.0.1/views/login.html)",
+      "Bash(curl -s --connect-timeout 5 -H 'User-Agent: Mozilla/5.0' http://192.168.0.1/views/Login.html)",
+      "Bash(curl -s --connect-timeout 5 -H 'User-Agent: Mozilla/5.0' http://192.168.0.1/pages/login.html)"
+    ]
+  }
+}
